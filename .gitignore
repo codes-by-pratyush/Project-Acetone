@@ -31,3 +31,7 @@ dist/
 
 # Logs
 *.log
+.env
+venv/
+_pycache_/
+*.pyc
