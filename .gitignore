@@ -32,7 +32,3 @@ dist/
 
 # Logs
 *.log
-.venv/
-__pycache__/
-*.py[cod]
-.env

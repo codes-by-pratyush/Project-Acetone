@@ -5,46 +5,38 @@ import requests
 from dotenv import load_dotenv
 from web3 import Web3
 
-
-# Find the .env file in the project root
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 
-
-# Get the Alchemy API key
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
+RPC_URL = (
+    f"https://eth-sepolia.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
+    if ALCHEMY_API_KEY
+    else None
+)
+web3 = Web3(Web3.HTTPProvider(RPC_URL)) if RPC_URL else None
 
-if not ALCHEMY_API_KEY:
-    raise ValueError("ALCHEMY_API_KEY was not found in .env")
-
-
-# Alchemy Sepolia RPC endpoint
-RPC_URL = f"https://eth-sepolia.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
-
-
-# Create Web3 connection
-web3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-
-# Check connection
-if web3.is_connected():
-    print("Connected to Ethereum Sepolia through Alchemy!")
-    print("Latest block:", web3.eth.block_number)
-else:
-    print("Connection failed.")
+def get_web3():
+    """Return a configured Sepolia Web3 client, or fail with setup guidance."""
+    if web3 is None:
+        raise RuntimeError("Set ALCHEMY_API_KEY in .env before using Ethereum provider functions.")
+    return web3
 
 
-# ---------------------------------------------------------
-# Get wallet transfer history using Alchemy Transfers API
-# ---------------------------------------------------------
+def get_rpc_url():
+    """Return the configured Alchemy RPC URL, or fail with setup guidance."""
+    if RPC_URL is None:
+        raise RuntimeError("Set ALCHEMY_API_KEY in .env before using Ethereum provider functions.")
+    return RPC_URL
+
 
 def get_wallet_transfers(wallet_address):
-     """Get all Sepolia transfers involving a wallet address."""
+    """Get all outgoing Sepolia transfers involving a wallet address."""
 
-     all_transfers = []
-     page_key = None
+    all_transfers = []
+    page_key = None
 
-     while True:
+    while True:
 
         request_params = {
             "fromBlock": "0x0",
@@ -70,7 +62,7 @@ def get_wallet_transfers(wallet_address):
         }
 
         response = requests.post(
-            RPC_URL,
+            get_rpc_url(),
             json=request_body,
             timeout=30,
         )
@@ -93,10 +85,9 @@ def get_wallet_transfers(wallet_address):
         if not page_key:
             break
 
-     return all_transfers
-# ---------------------------------------------------------
-# Normalize Alchemy transfer data
-# ---------------------------------------------------------
+    return all_transfers
+
+
 def get_latest_wallet_transfers(wallet_address, from_block="0x0"):
     """Get incoming and outgoing Sepolia transfers involving a wallet."""
 
@@ -136,7 +127,7 @@ def get_latest_wallet_transfers(wallet_address, from_block="0x0"):
             }
 
             response = requests.post(
-                RPC_URL,
+                get_rpc_url(),
                 json=request_body,
                 timeout=30,
             )
@@ -158,11 +149,12 @@ def get_latest_wallet_transfers(wallet_address, from_block="0x0"):
                 break
 
     return all_transfers
-#---------------------------------------------------------
+
+
 def get_new_wallet_transfers(wallet_address, last_checked_block):
     """Get wallet transfers from the block after the last checked block."""
 
-    latest_block = web3.eth.block_number
+    latest_block = get_web3().eth.block_number
 
     if last_checked_block >= latest_block:
         return [], latest_block
@@ -176,22 +168,23 @@ def get_new_wallet_transfers(wallet_address, last_checked_block):
 
     return transfers, latest_block
 
-#---------------------------------------------------------
-#---------------------------------------------------------
 
 def get_transaction_fee(transaction_hash):
     """Get the transaction fee in ETH."""
 
-    transaction = web3.eth.get_transaction(transaction_hash)
-    receipt = web3.eth.get_transaction_receipt(transaction_hash)
+    client = get_web3()
+    transaction = client.eth.get_transaction(transaction_hash)
+    receipt = client.eth.get_transaction_receipt(transaction_hash)
 
     gas_used = receipt["gasUsed"]
     gas_price = transaction["gasPrice"]
 
     fee_wei = gas_used * gas_price
-    fee_eth = web3.from_wei(fee_wei, "ether")
+    fee_eth = client.from_wei(fee_wei, "ether")
 
     return float(fee_eth)
+
+
 def normalize_transfer(transfer):
     """Convert Alchemy transfer data into ACETONE's standard format."""
 
@@ -207,12 +200,7 @@ def normalize_transfer(transfer):
     }
 
 
-# ---------------------------------------------------------
-# Test
-# ---------------------------------------------------------
-
 if __name__ == "__main__":
-
     test_wallet = "0x3cfDc212769c890907bcE93D3d8C2c53dE6a7a89"
 
     transfers = get_wallet_transfers(test_wallet)
@@ -220,17 +208,17 @@ if __name__ == "__main__":
     print(f"Found {len(transfers)} transfers")
 
     for transfer in transfers:
-       normalized = normalize_transfer(transfer)
+        normalized = normalize_transfer(transfer)
 
-       print("\n-----------------------------")
-       print("From:", normalized["from_address"])
-       print("To:", normalized["to_address"])
-       print("Amount:", normalized["amount"])
-       print("Asset:", normalized["asset"])
-       print("Timestamp:", normalized["timestamp"])
-       print("Transaction Hash:", normalized["transaction_hash"])
-       print("Chain:", normalized["chain"])
-       print("Fee:", normalized["fee"])
+        print("\n-----------------------------")
+        print("From:", normalized["from_address"])
+        print("To:", normalized["to_address"])
+        print("Amount:", normalized["amount"])
+        print("Asset:", normalized["asset"])
+        print("Timestamp:", normalized["timestamp"])
+        print("Transaction Hash:", normalized["transaction_hash"])
+        print("Chain:", normalized["chain"])
+        print("Fee:", normalized["fee"])
 
     print("\n====LATEST TRANSFERS TEST====")
     latest_transfers = get_latest_wallet_transfers(test_wallet)
@@ -238,5 +226,8 @@ if __name__ == "__main__":
 
     print("\n====NEW TRANSFERS TEST====")
     last_checked_block = 0
-    new_transfers, latest_block = get_new_wallet_transfers(test_wallet, last_checked_block)
+    new_transfers, latest_block = get_new_wallet_transfers(
+        test_wallet,
+        last_checked_block,
+    )
     print("New transfers found:", len(new_transfers))
