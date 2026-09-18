@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Float, DateTime, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime
 from backend.app.database import Base
 
 class VASPLabel(Base):
@@ -13,7 +13,3 @@ class VASPLabel(Base):
     confidence_score = Column(Float, nullable=False, default=0.90)
     source = Column(String(100), default="public_records")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("idx_vasp_lookup", "address", "chain"),
-    )

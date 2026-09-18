@@ -1,5 +1,6 @@
 import time
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, Response
@@ -37,6 +38,22 @@ def health_check():
 @app.post("/mock-ncrp/case-sync", response_model=CaseSyncResponse, status_code=201)
 def sync_case_to_ncrp(payload: CaseSyncRequest, response: Response):
     time.sleep(0.3)
+    response.headers["X-Disclaimer"] = MOCK_DISCLAIMER
+    
+    ack_id = f"NCRP-SAHYOG-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    
+    return CaseSyncResponse(
+        acknowledgment_id=ack_id,
+        case_number=payload.case_number,
+        status="ACKNOWLEDGED_UNDER_REVIEW",
+        received_at=datetime.now(timezone.utc),
+        simulated_portal="National Cyber Crime Reporting Portal (SAHYOG Gateway)",
+        disclaimer=MOCK_DISCLAIMER
+    )
+
+@app.post("/mock-ncrp/case-sync", response_model=CaseSyncResponse, status_code=201)
+async def sync_case_to_ncrp(payload: CaseSyncRequest, response: Response):
+    await asyncio.sleep(0.3)
     response.headers["X-Disclaimer"] = MOCK_DISCLAIMER
     
     ack_id = f"NCRP-SAHYOG-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"

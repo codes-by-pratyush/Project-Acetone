@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 # EVM (0x + 40 hex chars), BTC (Legacy/SegWit/Taproot), TRON (T + 33 base58)
 EVM_REGEX = re.compile(r"^0x[a-fA-F0-9]{40}$")
 BTC_REGEX = re.compile(r"^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-zA-HJ-NP-Z0-9]{25,90})$")
-TRON_REGEX = re.compile(r"^T[a-zA-HJ-NP-Z1-9]{33}$")
+TRON_REGEX = re.compile(r"^T[a-km-zA-HJ-NP-Z1-9]{33}$")
 TX_HASH_REGEX = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
 def validate_wallet_address(address: str) -> str:

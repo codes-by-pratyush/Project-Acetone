@@ -60,7 +60,7 @@ def seed_vasp_intelligence():
         print(f"=== T-M4-08: Successfully seeded {inserted} new VASP exchange records ===")
     except Exception as e:
         db.rollback()
-        print("Database connection bypass (local mode): Tables and schemas verified.")
+        print(f"FAILED to seed VASP intelligence. Database error: {e}")
     finally:
         db.close()
 
