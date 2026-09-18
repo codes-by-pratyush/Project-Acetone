@@ -1,3 +1,4 @@
+from Blockchain.storage.transaction_store import save_transaction
 from Blockchain.providers.ethereum import (
     get_new_wallet_transfers,
     normalize_transfer,
@@ -51,7 +52,8 @@ class WalletMonitor:
             watched_wallets = self.process_transfer(transfer)
 
             if watched_wallets:
-                relevant_transfers.append(transfer)
+                save_transaction(transfer)
+        relevant_transfers.append(transfer)
 
         self.last_checked_blocks[wallet_address] = latest_block
 

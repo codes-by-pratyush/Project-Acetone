@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -195,12 +196,22 @@ def get_transaction_fee(transaction_hash):
 def normalize_transfer(transfer):
     """Convert Alchemy transfer data into ACETONE's standard format."""
 
+    timestamp = transfer.get("metadata", {}).get("blockTimestamp")
+
+    if isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(
+            timestamp.replace("Z", "+00:00")
+        )
+
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+
     return {
         "from_address": transfer.get("from"),
         "to_address": transfer.get("to"),
         "amount": transfer.get("value"),
         "asset": transfer.get("asset"),
-        "timestamp": transfer.get("metadata", {}).get("blockTimestamp"),
+        "timestamp": timestamp,
         "transaction_hash": transfer.get("hash"),
         "chain": "sepolia",
         "fee": get_transaction_fee(transfer.get("hash")),
