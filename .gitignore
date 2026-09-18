@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+_pycache_/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Node (Frontend)
+node_modules/
+dist/
+
+# Logs
+*.log
