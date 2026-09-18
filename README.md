@@ -9,15 +9,15 @@
 
 ---
 
-## 💡 The Problem
+##  The Problem
 As cryptocurrency adoption grows, so does its use in illicit activities. Financial Intelligence Units (FIUs) and forensic investigators struggle to manually trace stolen funds across thousands of obfuscated transactions, multiple hops, and complex wallet networks. Traditional methods are slow, manual, and prone to human error.
 
-## 🚀 Our Solution
+##  Our Solution
 **Project Acetone** is a multi-service, graph-powered investigation platform engineered to automate the tracing of EVM-compatible fund flows. We provide investigators with an interactive, hop-by-hop visual graph, probabilistic exchange attribution, and automated risk scoring—turning raw blockchain data into actionable intelligence in seconds.
 
 ---
 
-## ✨ Key Features & Technical Innovation
+##  Key Features & Technical Innovation
 
 * **Interactive Threat Tracing (Neo4j + Cytoscape.js):** 
   We model EVM wallets as nodes and transactions as directed edges. This allows investigators to visually expand transaction paths hop-by-hop to discover where stolen funds are pooling.
@@ -108,9 +108,9 @@ Databases: PostgreSQL (Relational), Neo4j (Graph), Redis (Cache)
 DevOps: Docker, Docker Compose, Git
 
 - The Team
-Pratyush Ranjan Sahu – Team Leader & Backend Lead
-Saishree Mohanty – Frontend & UX/UI Lead
-Asad Ahemad – Blockchain Integration Engineer
-Subham Sahoo 4 – Database & Infrastructure Engineer
-Jyotirmaye Dalai – Cybersecurity & AppSec Developer
-Anshuman Pani – OSINT & Research Lead
+M1 - Pratyush Ranjan Sahu – Team Leader & Backend Lead
+M2 - Saishree Mohanty – Frontend & UX/UI Lead
+M3 - Asad Ahemad – Blockchain Integration Engineer
+M4 - Subham Sahoo 4 – Database & Infrastructure Engineer
+M5 - Jyotirmaye Dalai – Cybersecurity & AppSec Developer
+M6 - Anshuman Pani – OSINT & Research Lead
