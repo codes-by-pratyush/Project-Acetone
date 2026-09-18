@@ -1,59 +1,75 @@
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from backend.app.schemas.validators import (
+    validate_wallet_address,
+    validate_tx_hash,
+    validate_positive_amount,
+    validate_non_future_timestamp
+)
 
-class NormalizedTransaction(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class BaseContract(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, from_attributes=True)
 
-    from_address: str = Field(..., alias="from")
-    to_address: str = Field(..., alias="to")
-    amount: float
-    asset: str
-    timestamp: datetime
-    tx_hash: str
-    chain: str
-    fee: Optional[float] = 0.0
+class TransactionContract(BaseContract):
+    tx_hash: str = Field(..., description="Transaction hash with 0x prefix")
+    from_address: str = Field(..., description="Sender wallet address")
+    to_address: str = Field(..., description="Receiver wallet address")
+    amount: float = Field(..., gt=0, description="Transfer amount strictly > 0")
+    asset: str = Field(default="ETH", max_length=10)
+    timestamp: datetime = Field(..., description="ISO 8601 transaction timestamp")
+    chain: str = Field(default="ethereum", max_length=32)
+    fee: Optional[float] = Field(default=0.0, ge=0)
 
-class WalletTraceResponse(BaseModel):
-    root_wallet: str
-    depth: int
-    total_volume: float
-    transactions: List[NormalizedTransaction]
+    @field_validator("tx_hash")
+    @classmethod
+    def check_tx_hash(cls, v: str) -> str:
+        return validate_tx_hash(v)
 
-class WalletRiskResponse(BaseModel):
+    @field_validator("from_address", "to_address")
+    @classmethod
+    def check_addresses(cls, v: str) -> str:
+        return validate_wallet_address(v)
+
+    @field_validator("amount")
+    @classmethod
+    def check_amount(cls, v: float) -> float:
+        return validate_positive_amount(v)
+
+    @field_validator("timestamp")
+    @classmethod
+    def check_timestamp(cls, v: datetime) -> datetime:
+        return validate_non_future_timestamp(v)
+
+class CaseCreateRequest(BaseContract):
+    case_number: str = Field(..., min_length=3, max_length=64)
+    title: str = Field(..., min_length=5, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    investigator_id: str = Field(..., min_length=2, max_length=64)
+
+class CaseResponse(CaseCreateRequest):
+    id: int
+    created_at: datetime
+    status: str
+
+class TraceResponse(BaseContract):
     wallet_address: str
     risk_score: float = Field(..., ge=0.0, le=100.0)
-    risk_level: str
-    flagged_reasons: List[str]
+    associated_cases: List[str] = []
+    hop_depth: int = Field(default=1, ge=1, le=10)
 
-class WalletVASPResponse(BaseModel):
-    wallet_address: str
-    vasp_name: Optional[str] = None
-    is_sanctioned: bool = False
-    category: str
+    @field_validator("wallet_address")
+    @classmethod
+    def check_wallet(cls, v: str) -> str:
+        return validate_wallet_address(v)
 
-class CaseCreateRequest(BaseModel):
-    title: str
-    description: Optional[str] = None
+class AlertRuleContract(BaseContract):
+    alert_name: str = Field(..., min_length=3, max_length=128)
+    target_wallet: str = Field(..., description="Target wallet to monitor")
+    threshold_amount: float = Field(..., gt=0)
+    severity: str = Field(default="HIGH")
 
-class CaseResponse(BaseModel):
-    id: int
-    title: str
-    description: Optional[str] = None
-    status: str
-    created_at: datetime
-    transactions: List[NormalizedTransaction] = []
-
-class CaseReportResponse(BaseModel):
-    case_id: int
-    summary: str
-    total_tainted_value: float
-    involved_wallets: List[str]
-    generated_at: datetime
-
-class AlertResponse(BaseModel):
-    id: int
-    wallet_address: str
-    rule_name: str
-    severity: str
-    created_at: datetime
+    @field_validator("target_wallet")
+    @classmethod
+    def check_target_wallet(cls, v: str) -> str:
+        return validate_wallet_address(v)
