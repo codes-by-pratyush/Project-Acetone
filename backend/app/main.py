@@ -1,11 +1,21 @@
 from fastapi import FastAPI
 from backend.app.routers.endpoints import router as api_router
-from app.routers import cases, wallets, auth
+from backend.app.routers import cases, wallets, auth
 
 app = FastAPI(
     title="Crypto Investigation API",
     version="1.0.0",
     description="API contract specifications for cases, wallet tracing, risk, and alerts.",
+)
+from fastapi.middleware.cors import CORSMiddleware
+
+# Add this right after initializing app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Core routes & M4 Database API
