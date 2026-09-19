@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from app.core.security import create_access_token
+from backend.app.core.security import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -15,9 +15,14 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
         )
     
     # Generate the JWT token containing the user's ID and role
+    user_role = "lead_investigator"
     access_token = create_access_token(
-        data={"sub": form_data.username, "role": "lead_investigator"}
+        data={"sub": form_data.username, "role": user_role}
     )
     
     # FastAPI expects this exact JSON structure for OAuth2 logins
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer", 
+        "role": user_role
+    }
