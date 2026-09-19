@@ -2,6 +2,9 @@ from Blockchain.tasks.celery_app import celery_app
 from Blockchain.tracing.fund_flow import trace_funds
 from Blockchain.risk.risk_engine import calculate_wallet_risk
 from Blockchain.attribution.vasp_attribution import attribute_trace
+from Blockchain.playbook.investigation_playbook import (
+    build_investigation_playbook,
+)
 
 
 def make_json_serializable(value):
@@ -41,11 +44,20 @@ def analyze_wallet(wallet_address):
     # ATTRIBUTE
     attribution_result = attribute_trace(trace_result)
 
+    # PLAYBOOK
+    playbook_result = build_investigation_playbook(
+        wallet_address,
+        trace_result,
+        risk_result,
+        attribution_result,
+    )
+
     result = {
         "wallet": wallet_address.lower(),
         "trace": trace_result,
         "risk": risk_result,
         "attribution": attribution_result,
+        "playbook": playbook_result,
     }
 
     return make_json_serializable(result)
