@@ -32,4 +32,5 @@ node_modules/
 dist/
 
 # Logs
-*.log
+*.logaudit_log.json
+audit_log.json

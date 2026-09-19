@@ -1,31 +1,30 @@
 from fastapi import FastAPI
-from backend.app.routers.endpoints import router as api_router
+from fastapi.middleware.cors import CORSMiddleware
+from backend.app.middleware.audit import AuditLogMiddleware
 from backend.app.routers import cases, wallets, auth
 
 app = FastAPI(
-    title="Crypto Investigation API",
-    version="1.0.0",
-    description="API contract specifications for cases, wallet tracing, risk, and alerts.",
+    title="Project Acetone Security Engine",
+    version="1.0.0"
 )
-from fastapi.middleware.cors import CORSMiddleware
 
-# Add this right after initializing app = FastAPI()
+# Security Audit Trail Middleware
+app.add_middleware(AuditLogMiddleware)
+
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Core routes & M4 Database API
-app.include_router(api_router)
+# Routers
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(cases.router, prefix="/cases", tags=["Cases"])
+app.include_router(wallets.router, prefix="/wallets", tags=["Wallets"])
 
-# Mock routes & Authentication
-app.include_router(auth.router)
-app.include_router(cases.router)
-app.include_router(wallets.router)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
+@app.get("/health", tags=["Health"])
+def health_check():
+    return {"status": "Acetone Backend Security Engine Active"}
