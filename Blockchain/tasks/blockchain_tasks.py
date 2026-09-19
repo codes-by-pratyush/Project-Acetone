@@ -1,14 +1,10 @@
 from Blockchain.tasks.celery_app import celery_app
 from Blockchain.tracing.fund_flow import trace_funds
 from Blockchain.risk.risk_engine import calculate_wallet_risk
+from Blockchain.attribution.vasp_attribution import attribute_trace
 
 
 def make_json_serializable(value):
-    """
-    Convert Neo4j DateTime objects and nested structures
-    into JSON-serializable Python values.
-    """
-
     if isinstance(value, dict):
         return {
             key: make_json_serializable(item)
@@ -29,13 +25,9 @@ def make_json_serializable(value):
 
 @celery_app.task
 def analyze_wallet(wallet_address):
-    """
-    Run fund-flow tracing and risk analysis for a wallet
-    in the background using Celery.
-    """
-
     wallet_address = wallet_address.strip()
 
+    # TRACE
     trace_result = trace_funds(
         wallet_address,
         max_hops=6,
@@ -43,12 +35,17 @@ def analyze_wallet(wallet_address):
         max_nodes=1000,
     )
 
+    # ANALYZE
     risk_result = calculate_wallet_risk(wallet_address)
+
+    # ATTRIBUTE
+    attribution_result = attribute_trace(trace_result)
 
     result = {
         "wallet": wallet_address.lower(),
         "trace": trace_result,
         "risk": risk_result,
+        "attribution": attribution_result,
     }
 
     return make_json_serializable(result)
