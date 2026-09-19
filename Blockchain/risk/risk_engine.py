@@ -5,6 +5,7 @@ from Blockchain.tracing.patterns import (
 
 from Blockchain.risk.rules import is_round_number
 from Blockchain.risk.velocity import detect_rapid_forwarding
+from Blockchain.risk.wallet_age import is_new_wallet
 from Blockchain.storage.neo4j_store import driver
 
 
@@ -60,6 +61,7 @@ def calculate_wallet_risk(wallet_address):
     split_result = detect_split(wallet_address)
     consolidation_result = detect_consolidation(wallet_address)
     rapid_forwarding_result = detect_rapid_forwarding(wallet_address)
+    wallet_age_result = is_new_wallet(wallet_address)
 
     transactions = get_wallet_transactions(wallet_address)
 
@@ -109,6 +111,22 @@ def calculate_wallet_risk(wallet_address):
             "transactions": rapid_forwarding_result["transactions"],
         })
 
+    # New wallet
+    if wallet_age_result["is_new"]:
+        score += 10
+
+        evidence.append({
+            "rule": "new_wallet",
+            "description": (
+                "Wallet's observed transaction history "
+                "spans less than the configured wallet-age threshold."
+            ),
+            "points": 10,
+            "age_seconds": wallet_age_result["age_seconds"],
+            "first_seen": wallet_age_result["first_seen"],
+            "last_seen": wallet_age_result["last_seen"],
+        })
+
     # Round-number transfers
     round_number_transactions = [
         transaction
@@ -138,6 +156,7 @@ def calculate_wallet_risk(wallet_address):
             "fan_out": split_result["detected"],
             "fan_in": consolidation_result["detected"],
             "rapid_forwarding": rapid_forwarding_result["detected"],
+            "new_wallet": wallet_age_result["is_new"],
             "round_number_transfer": bool(
                 round_number_transactions
             ),
