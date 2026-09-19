@@ -5,6 +5,9 @@ from Blockchain.attribution.vasp_attribution import attribute_trace
 from Blockchain.playbook.investigation_playbook import (
     build_investigation_playbook,
 )
+from Blockchain.playbook.investigation_report import (
+    build_investigation_report,
+)
 from Blockchain.monitoring.monitor import WalletMonitor
 from Blockchain.providers.ethereum import w3
 
@@ -45,10 +48,14 @@ def analyze_wallet(wallet_address):
     )
 
     # ANALYZE
-    risk_result = calculate_wallet_risk(wallet_address)
+    risk_result = calculate_wallet_risk(
+        wallet_address
+    )
 
     # ATTRIBUTE
-    attribution_result = attribute_trace(trace_result)
+    attribution_result = attribute_trace(
+        trace_result
+    )
 
     # PLAYBOOK
     playbook_result = build_investigation_playbook(
@@ -58,22 +65,36 @@ def analyze_wallet(wallet_address):
         attribution_result,
     )
 
+    # REPORT
+    report_result = build_investigation_report(
+        wallet_address,
+        trace_result,
+        risk_result,
+        attribution_result,
+        playbook_result,
+    )
+
     result = {
         "wallet": wallet_address.lower(),
         "trace": trace_result,
         "risk": risk_result,
         "attribution": attribution_result,
         "playbook": playbook_result,
+        "report": report_result,
     }
 
-    return make_json_serializable(result)
+    return make_json_serializable(
+        result
+    )
 
 
 @celery_app.task
 def poll_wallet(wallet_address):
     wallet_address = wallet_address.strip().lower()
 
-    if not wallet_monitor.is_watched(wallet_address):
+    if not wallet_monitor.is_watched(
+        wallet_address
+    ):
         current_block = w3.eth.block_number
 
         wallet_monitor.add_wallet(
@@ -108,7 +129,9 @@ def poll_wallet(wallet_address):
 
 @celery_app.task
 def poll_watched_wallets():
-    wallets = wallet_monitor.get_watched_wallets()
+    wallets = (
+        wallet_monitor.get_watched_wallets()
+    )
 
     results = []
 
@@ -122,11 +145,15 @@ def poll_watched_wallets():
         results.append(
             {
                 "wallet": wallet_address,
-                "transfers_found": len(transfers),
+                "transfers_found": len(
+                    transfers
+                ),
                 "latest_block": latest_block,
                 "transfers": transfers,
                 "status": "poll_completed",
             }
         )
 
-    return make_json_serializable(results)
+    return make_json_serializable(
+        results
+    )
