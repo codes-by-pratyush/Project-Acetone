@@ -1,10 +1,12 @@
+from Blockchain.storage.neo4j_store import save_transaction_to_graph
 from backend.app.database import SessionLocal
 from backend.app.models.relational import TransactionModel
 
 
 def save_transaction(transaction):
     """
-    Save a normalized blockchain transaction into PostgreSQL.
+    Save a normalized blockchain transaction into PostgreSQL
+    and Neo4j.
     """
 
     db = SessionLocal()
@@ -31,6 +33,8 @@ def save_transaction(transaction):
         db.add(record)
         db.commit()
         db.refresh(record)
+
+        save_transaction_to_graph(transaction)
 
         return record
 
