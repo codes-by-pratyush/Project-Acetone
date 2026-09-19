@@ -1,4 +1,5 @@
 from heapq import heappush, heappop
+from itertools import count
 
 from Blockchain.storage.neo4j_store import driver
 
@@ -71,11 +72,16 @@ def trace_funds(
 
     queue = []
 
+    # Unique sequence number prevents heapq from ever trying
+    # to compare complex objects such as transaction dictionaries.
+    sequence = count()
+
     heappush(
         queue,
         (
             0,
             float("-inf"),
+            next(sequence),
             start_wallet,
             [start_wallet],
             [],
@@ -91,6 +97,7 @@ def trace_funds(
         (
             hops,
             priority,
+            _sequence,
             current_wallet,
             wallets,
             transactions,
@@ -178,6 +185,7 @@ def trace_funds(
                 (
                     hops + 1,
                     -amount,
+                    next(sequence),
                     next_wallet,
                     new_wallets,
                     new_transactions,
@@ -200,6 +208,7 @@ def trace_funds(
                 (
                     queued_hops,
                     queued_priority,
+                    _queued_sequence,
                     queued_wallet,
                     queued_wallets,
                     queued_transactions,

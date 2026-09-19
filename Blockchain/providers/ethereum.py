@@ -1,95 +1,100 @@
 import os
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from dotenv import load_dotenv
 from web3 import Web3
 
 
 # ============================================================
-# PROJECT CONFIG
+# ENVIRONMENT
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
-
+load_dotenv()
 
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
 
 if not ALCHEMY_API_KEY:
-    raise ValueError("ALCHEMY_API_KEY was not found in .env")
-
-
-RPC_URL = f"https://eth-sepolia.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
+    raise RuntimeError(
+        "ALCHEMY_API_KEY is not set in the environment."
+    )
 
 
 # ============================================================
-# HTTP RETRY CONFIGURATION
+# ALCHEMY / WEB3 CONNECTION
+# ============================================================
+
+ALCHEMY_URL = (
+    f"https://eth-sepolia.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
+)
+
+w3 = Web3(Web3.HTTPProvider(ALCHEMY_URL))
+
+
+if not w3.is_connected():
+    raise RuntimeError(
+        "Could not connect to Ethereum Sepolia through Alchemy."
+    )
+
+
+print("Connected to Ethereum Sepolia through Alchemy!")
+print(f"Latest block: {w3.eth.block_number}")
+
+
+# ============================================================
+# HTTP RETRY STRATEGY
 # ============================================================
 
 retry_strategy = Retry(
     total=3,
     backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
+    status_forcelist=[
+        429,
+        500,
+        502,
+        503,
+        504,
+    ],
     allowed_methods=["POST"],
 )
 
-adapter = HTTPAdapter(max_retries=retry_strategy)
-
 http_session = requests.Session()
-http_session.mount("https://", adapter)
-http_session.mount("http://", adapter)
+
+adapter = HTTPAdapter(
+    max_retries=retry_strategy
+)
+
+http_session.mount(
+    "https://",
+    adapter,
+)
 
 
 # ============================================================
-# RATE LIMITING
+# LOCAL RATE LIMITING
 # ============================================================
 
 MIN_REQUEST_INTERVAL = 0.25
+
 _last_request_time = 0.0
 
 
-def wait_for_rate_limit():
+def rate_limit():
     global _last_request_time
 
-    current_time = time.monotonic()
+    current_time = time.time()
+
     elapsed = current_time - _last_request_time
 
     if elapsed < MIN_REQUEST_INTERVAL:
-        time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+        time.sleep(
+            MIN_REQUEST_INTERVAL - elapsed
+        )
 
-    _last_request_time = time.monotonic()
-
-
-def post_to_provider(request_body):
-    wait_for_rate_limit()
-
-    response = http_session.post(
-        RPC_URL,
-        json=request_body,
-        timeout=30,
-    )
-
-    response.raise_for_status()
-
-    return response
-
-
-# ============================================================
-# WEB3 CONNECTION
-# ============================================================
-
-web3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-if web3.is_connected():
-    print("Connected to Ethereum Sepolia through Alchemy!")
-    print("Latest block:", web3.eth.block_number)
-else:
-    print("Connection failed.")
+    _last_request_time = time.time()
 
 
 # ============================================================
@@ -106,183 +111,301 @@ def get_cached_transfers(wallet_address):
 
     cached = TRANSFER_CACHE.get(wallet_address)
 
-    if cached is None:
+    if not cached:
         return None
 
-    cached_data, cached_time = cached
+    cached_time = cached["timestamp"]
 
-    if time.monotonic() - cached_time > CACHE_TTL_SECONDS:
+    if time.time() - cached_time > CACHE_TTL_SECONDS:
         del TRANSFER_CACHE[wallet_address]
         return None
 
-    return cached_data
+    return cached["transfers"]
 
 
-def cache_transfers(wallet_address, transfers):
+def cache_transfers(
+    wallet_address,
+    transfers,
+):
     wallet_address = wallet_address.lower()
 
-    TRANSFER_CACHE[wallet_address] = (
-        transfers,
-        time.monotonic(),
+    TRANSFER_CACHE[wallet_address] = {
+        "timestamp": time.time(),
+        "transfers": transfers,
+    }
+
+    print(
+        f"Cached {len(transfers)} transfers "
+        f"for {CACHE_TTL_SECONDS} seconds."
     )
 
 
 def clear_transfer_cache(wallet_address=None):
-    """
-    Clear cached transfer data.
-
-    If wallet_address is provided, only that wallet's cache
-    is cleared.
-
-    If wallet_address is None, the entire cache is cleared.
-    """
-
     if wallet_address is None:
         TRANSFER_CACHE.clear()
-    else:
-        TRANSFER_CACHE.pop(wallet_address.lower(), None)
+        return
+
+    wallet_address = wallet_address.lower()
+
+    TRANSFER_CACHE.pop(
+        wallet_address,
+        None,
+    )
 
 
 # ============================================================
-# FULL WALLET TRANSFER HISTORY
+# ALCHEMY TRANSFER API
 # ============================================================
+
+def post_to_provider(method, params):
+    rate_limit()
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    }
+
+    response = http_session.post(
+        ALCHEMY_URL,
+        json=payload,
+        timeout=30,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    if "error" in data:
+        raise RuntimeError(
+            f"Alchemy API error: {data['error']}"
+        )
+
+    return data
+
 
 def get_wallet_transfers(wallet_address):
     wallet_address = wallet_address.lower()
 
-    # Check cache first
-    cached_transfers = get_cached_transfers(wallet_address)
-
-    if cached_transfers is not None:
-        print(f"Cache hit: {wallet_address}")
-        return cached_transfers
-
-    print(f"Cache miss: {wallet_address}")
-    print("Fetching wallet transfers from Alchemy...")
-
-    all_transfers = []
-    page_key = None
-
-    while True:
-        request_params = {
-            "fromBlock": "0x0",
-            "toBlock": "latest",
-            "fromAddress": wallet_address,
-            "category": ["external", "erc20"],
-            "withMetadata": True,
-            "excludeZeroValue": True,
-        }
-
-        if page_key:
-            request_params["pageKey"] = page_key
-
-        request_body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "alchemy_getAssetTransfers",
-            "params": [request_params],
-        }
-
-        response = post_to_provider(request_body)
-
-        data = response.json()
-
-        if "error" in data:
-            raise RuntimeError(data["error"])
-
-        result = data["result"]
-
-        all_transfers.extend(result["transfers"])
-
-        page_key = result.get("pageKey")
-
-        if not page_key:
-            break
-
-    # Store result in cache
-    cache_transfers(wallet_address, all_transfers)
-
-    print(
-        f"Cached {len(all_transfers)} transfers "
-        f"for {CACHE_TTL_SECONDS} seconds."
+    cached_transfers = get_cached_transfers(
+        wallet_address
     )
 
-    return all_transfers
+    if cached_transfers is not None:
+        print(
+            f"Cache hit: {wallet_address}"
+        )
+        return cached_transfers
+
+    print(
+        f"Cache miss: {wallet_address}"
+    )
+
+    print(
+        "Fetching wallet transfers from Alchemy..."
+    )
+
+    transfers = []
+
+    categories = [
+        "external",
+        "internal",
+        "erc20",
+        "erc721",
+        "erc1155",
+    ]
+
+    for category in categories:
+
+        params = [
+            {
+                "fromAddress": wallet_address,
+                "category": [category],
+                "withMetadata": True,
+            }
+        ]
+
+        try:
+            data = post_to_provider(
+                "alchemy_getAssetTransfers",
+                params,
+            )
+
+            result = data.get(
+                "result",
+                {},
+            )
+
+            transfers.extend(
+                result.get(
+                    "transfers",
+                    [],
+                )
+            )
+
+        except Exception as error:
+            print(
+                f"Failed fetching outgoing "
+                f"{category} transfers: {error}"
+            )
+
+        params = [
+            {
+                "toAddress": wallet_address,
+                "category": [category],
+                "withMetadata": True,
+            }
+        ]
+
+        try:
+            data = post_to_provider(
+                "alchemy_getAssetTransfers",
+                params,
+            )
+
+            result = data.get(
+                "result",
+                {},
+            )
+
+            transfers.extend(
+                result.get(
+                    "transfers",
+                    [],
+                )
+            )
+
+        except Exception as error:
+            print(
+                f"Failed fetching incoming "
+                f"{category} transfers: {error}"
+            )
+
+    cache_transfers(
+        wallet_address,
+        transfers,
+    )
+
+    return transfers
 
 
 # ============================================================
 # LATEST WALLET TRANSFERS
 # ============================================================
 
-def get_latest_wallet_transfers(wallet_address, from_block="0x0"):
+def get_latest_wallet_transfers(
+    wallet_address,
+    from_block="0x0",
+):
     wallet_address = wallet_address.lower()
 
-    all_transfers = []
+    transfers = []
 
-    for direction in ["outgoing", "incoming"]:
+    categories = [
+        "external",
+        "internal",
+        "erc20",
+        "erc721",
+        "erc1155",
+    ]
 
-        page_key = None
+    latest_block = w3.eth.block_number
 
-        while True:
+    for category in categories:
 
-            request_params = {
+        params = [
+            {
+                "fromAddress": wallet_address,
                 "fromBlock": from_block,
-                "toBlock": "latest",
-                "category": ["external", "erc20"],
+                "toBlock": hex(latest_block),
+                "category": [category],
                 "withMetadata": True,
-                "excludeZeroValue": True,
-                "maxCount": "0x64",
             }
+        ]
 
-            if direction == "outgoing":
-                request_params["fromAddress"] = wallet_address
-            else:
-                request_params["toAddress"] = wallet_address
+        try:
+            data = post_to_provider(
+                "alchemy_getAssetTransfers",
+                params,
+            )
 
-            if page_key:
-                request_params["pageKey"] = page_key
+            result = data.get(
+                "result",
+                {},
+            )
 
-            request_body = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "alchemy_getAssetTransfers",
-                "params": [request_params],
+            transfers.extend(
+                result.get(
+                    "transfers",
+                    [],
+                )
+            )
+
+        except Exception as error:
+            print(
+                f"Failed fetching latest "
+                f"{category} transfers: {error}"
+            )
+
+        params = [
+            {
+                "toAddress": wallet_address,
+                "fromBlock": from_block,
+                "toBlock": hex(latest_block),
+                "category": [category],
+                "withMetadata": True,
             }
+        ]
 
-            response = post_to_provider(request_body)
+        try:
+            data = post_to_provider(
+                "alchemy_getAssetTransfers",
+                params,
+            )
 
-            data = response.json()
+            result = data.get(
+                "result",
+                {},
+            )
 
-            if "error" in data:
-                raise RuntimeError(data["error"])
+            transfers.extend(
+                result.get(
+                    "transfers",
+                    [],
+                )
+            )
 
-            result = data["result"]
+        except Exception as error:
+            print(
+                f"Failed fetching incoming "
+                f"latest {category} transfers: {error}"
+            )
 
-            all_transfers.extend(result["transfers"])
-
-            page_key = result.get("pageKey")
-
-            if not page_key:
-                break
-
-    return all_transfers
+    return transfers
 
 
 # ============================================================
-# NEW TRANSFERS SINCE LAST CHECKED BLOCK
+# NEW WALLET TRANSFERS
 # ============================================================
 
-def get_new_wallet_transfers(wallet_address, last_checked_block):
-    latest_block = web3.eth.block_number
+def get_new_wallet_transfers(
+    wallet_address,
+    last_checked_block,
+):
+    latest_block = w3.eth.block_number
 
-    if last_checked_block >= latest_block:
+    from_block = max(
+        int(last_checked_block),
+        0,
+    )
+
+    if from_block > latest_block:
         return [], latest_block
-
-    from_block = hex(last_checked_block + 1)
 
     transfers = get_latest_wallet_transfers(
         wallet_address,
-        from_block=from_block,
+        from_block=hex(from_block),
     )
 
     return transfers, latest_block
@@ -293,22 +416,38 @@ def get_new_wallet_transfers(wallet_address, last_checked_block):
 # ============================================================
 
 def get_transaction_fee(transaction_hash):
-    transaction = web3.eth.get_transaction(transaction_hash)
+    if not transaction_hash:
+        return 0.0
 
-    receipt = web3.eth.get_transaction_receipt(transaction_hash)
+    try:
+        transaction = w3.eth.get_transaction(
+            transaction_hash
+        )
 
-    gas_used = receipt["gasUsed"]
+        receipt = w3.eth.get_transaction_receipt(
+            transaction_hash
+        )
 
-    gas_price = transaction["gasPrice"]
+        gas_used = receipt.gasUsed
 
-    fee_wei = gas_used * gas_price
+        gas_price = transaction.gasPrice
 
-    fee_eth = web3.from_wei(
-        fee_wei,
-        "ether",
-    )
+        fee_wei = gas_used * gas_price
 
-    return float(fee_eth)
+        fee_eth = w3.from_wei(
+            fee_wei,
+            "ether",
+        )
+
+        return float(fee_eth)
+
+    except Exception as error:
+        print(
+            f"Could not calculate transaction fee "
+            f"for {transaction_hash}: {error}"
+        )
+
+        return 0.0
 
 
 # ============================================================
@@ -316,32 +455,93 @@ def get_transaction_fee(transaction_hash):
 # ============================================================
 
 def normalize_transfer(transfer):
-    timestamp = transfer.get("metadata", {}).get(
+    metadata = transfer.get(
+        "metadata"
+    ) or {}
+
+    timestamp = metadata.get(
         "blockTimestamp"
     )
 
     if isinstance(timestamp, str):
 
         timestamp = datetime.fromisoformat(
-            timestamp.replace("Z", "+00:00")
+            timestamp.replace(
+                "Z",
+                "+00:00",
+            )
         )
 
         if timestamp.tzinfo is not None:
 
-            timestamp = timestamp.astimezone(
-                timezone.utc
-            ).replace(tzinfo=None)
+            timestamp = (
+                timestamp.astimezone(
+                    timezone.utc
+                )
+                .replace(
+                    tzinfo=None
+                )
+            )
+
+    transaction_hash = transfer.get(
+        "hash"
+    )
+
+    amount = transfer.get(
+        "value"
+    )
+
+    asset = transfer.get(
+        "asset"
+    )
+
+    category = transfer.get(
+        "category"
+    )
+
+    # --------------------------------------------------------
+    # Skip transfers that cannot currently be normalized.
+    #
+    # For the current MVP we process transfers with a usable
+    # amount. ERC-20 records that do not expose a usable value
+    # are skipped instead of causing a database failure.
+    # --------------------------------------------------------
+
+    if amount is None:
+
+        print(
+            f"Skipping unnormalizable transfer: "
+            f"{transaction_hash} "
+            f"(category={category}, asset={asset})"
+        )
+
+        return None
 
     return {
-        "from_address": transfer.get("from"),
-        "to_address": transfer.get("to"),
-        "amount": transfer.get("value"),
-        "asset": transfer.get("asset"),
+        "from_address": transfer.get(
+            "from"
+        ),
+
+        "to_address": transfer.get(
+            "to"
+        ),
+
+        "amount": amount,
+
+        "asset": asset or "ETH",
+
         "timestamp": timestamp,
-        "transaction_hash": transfer.get("hash"),
+
+        "transaction_hash": transaction_hash,
+
         "chain": "sepolia",
-        "fee": get_transaction_fee(
-            transfer.get("hash")
+
+        "fee": (
+            get_transaction_fee(
+                transaction_hash
+            )
+            if transaction_hash
+            else 0.0
         ),
     }
 
@@ -356,56 +556,40 @@ if __name__ == "__main__":
         "0x3cfDc212769c890907bcE93D3d8C2c53dE6a7a89"
     )
 
-    print("\n==== FIRST REQUEST ====")
-
-    transfers = get_wallet_transfers(test_wallet)
-
     print(
-        f"Found {len(transfers)} transfers"
+        "\n==== FIRST REQUEST ===="
     )
 
-    print("\n==== SECOND REQUEST ====")
-
-    transfers_again = get_wallet_transfers(
+    transfers = get_wallet_transfers(
         test_wallet
     )
 
     print(
-        f"Found {len(transfers_again)} transfers"
+        f"Transfers: {len(transfers)}"
     )
 
-    print(
-        "\nCache test complete."
-    )
+    if transfers:
 
-    print("\n==== LATEST TRANSFERS TEST ====")
-
-    latest_transfers = get_latest_wallet_transfers(
-        test_wallet
-    )
-
-    print(
-        "Latest transfers found:",
-        len(latest_transfers),
-    )
-
-    print("\n==== NEW TRANSFERS TEST ====")
-
-    last_checked_block = 0
-
-    new_transfers, latest_block = (
-        get_new_wallet_transfers(
-            test_wallet,
-            last_checked_block,
+        normalized = normalize_transfer(
+            transfers[0]
         )
+
+        print(
+            "Normalized transfer:"
+        )
+
+        print(
+            normalized
+        )
+
+    print(
+        "\n==== SECOND REQUEST ===="
+    )
+
+    transfers = get_wallet_transfers(
+        test_wallet
     )
 
     print(
-        "New transfers found:",
-        len(new_transfers),
-    )
-
-    print(
-        "Latest block:",
-        latest_block,
+        f"Transfers: {len(transfers)}"
     )

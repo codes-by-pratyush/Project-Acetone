@@ -1,6 +1,10 @@
 from fastapi import FastAPI
+
 from backend.app.routers.endpoints import router as api_router
-from app.routers import cases, wallets, auth
+from backend.app.routers import cases, wallets, auth
+
+from Blockchain.monitoring.alchemy_webhook import router as alchemy_webhook_router
+
 
 app = FastAPI(
     title="Crypto Investigation API",
@@ -16,6 +20,16 @@ app.include_router(auth.router)
 app.include_router(cases.router)
 app.include_router(wallets.router)
 
+# Blockchain monitoring / Alchemy webhook
+app.include_router(alchemy_webhook_router)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
+
+    uvicorn.run(
+        "backend.app.main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True,
+    )
