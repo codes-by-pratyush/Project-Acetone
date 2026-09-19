@@ -5,6 +5,12 @@ from Blockchain.attribution.vasp_attribution import attribute_trace
 from Blockchain.playbook.investigation_playbook import (
     build_investigation_playbook,
 )
+from Blockchain.monitoring.monitor import WalletMonitor
+from Blockchain.providers.ethereum import w3
+
+
+# Shared monitor instance for the running worker process.
+wallet_monitor = WalletMonitor()
 
 
 def make_json_serializable(value):
@@ -61,3 +67,40 @@ def analyze_wallet(wallet_address):
     }
 
     return make_json_serializable(result)
+
+
+@celery_app.task
+def poll_wallet(wallet_address):
+    wallet_address = wallet_address.strip().lower()
+
+    if not wallet_monitor.is_watched(wallet_address):
+        current_block = w3.eth.block_number
+
+        wallet_monitor.add_wallet(
+            wallet_address,
+            start_block=current_block,
+        )
+
+        return {
+            "wallet": wallet_address,
+            "transfers_found": 0,
+            "latest_block": current_block,
+            "transfers": [],
+            "status": "monitoring_initialized",
+        }
+
+    transfers, latest_block = (
+        wallet_monitor.check_wallet(
+            wallet_address
+        )
+    )
+
+    return make_json_serializable(
+        {
+            "wallet": wallet_address,
+            "transfers_found": len(transfers),
+            "latest_block": latest_block,
+            "transfers": transfers,
+            "status": "poll_completed",
+        }
+    )
