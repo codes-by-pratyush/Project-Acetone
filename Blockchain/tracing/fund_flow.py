@@ -1,17 +1,28 @@
 from heapq import heappush, heappop
 from itertools import count
+from time import monotonic
 
 from Blockchain.storage.neo4j_store import driver
+
+
+TRACE_CHAIN = "sepolia"
 
 
 def get_outgoing_transactions(wallet_address):
     """
     Get outgoing transactions from a wallet.
+
+    Wallet address matching is case-insensitive because Ethereum
+    addresses may be represented using different letter casing.
     """
 
     query = """
-    MATCH (wallet:Wallet {address: $wallet_address, chain: $chain})
-          -[tx:SENT]->(destination:Wallet)
+    MATCH (wallet:Wallet)
+    WHERE toLower(wallet.address) = $wallet_address
+      AND wallet.chain = $chain
+
+    MATCH (wallet)-[tx:SENT]->(destination:Wallet)
+
     RETURN
         destination.address AS to_address,
         tx.hash AS hash,
@@ -25,22 +36,37 @@ def get_outgoing_transactions(wallet_address):
         result = session.run(
             query,
             wallet_address=wallet_address.lower(),
-            chain="sepolia",
+            chain=TRACE_CHAIN,
         )
 
         transactions = []
 
         for record in result:
-            transactions.append({
-                "to_address": record["to_address"],
-                "hash": record["hash"],
-                "amount": record["amount"],
-                "asset": record["asset"],
-                "timestamp": record["timestamp"],
-                "fee": record["fee"],
-            })
+            transactions.append(
+                {
+                    "to_address": record["to_address"],
+                    "hash": record["hash"],
+                    "amount": record["amount"],
+                    "asset": record["asset"],
+                    "timestamp": record["timestamp"],
+                    "fee": record["fee"],
+                }
+            )
 
         return transactions
+
+
+def _build_path(wallets, transactions):
+    """
+    Convert the current traversal state into the
+    machine-readable path format used by the rest of M3.
+    """
+
+    return {
+        "wallets": wallets,
+        "transactions": transactions,
+        "hops": len(transactions),
+    }
 
 
 def trace_funds(
@@ -48,32 +74,37 @@ def trace_funds(
     max_hops=6,
     min_amount_pct=10.0,
     max_nodes=1000,
+    max_seconds=5.0,
 ):
     """
-    Trace outgoing fund flow using priority-ordered BFS.
+    Trace outgoing fund flow using bounded priority BFS.
 
-    Higher-value transactions are explored first.
+    Traversal behavior:
 
-    A transaction is followed only when its amount is at least
-    min_amount_pct of the amount entering the current path.
+    - max_hops limits investigation depth.
+    - min_amount_pct applies amount-decay pruning.
+    - max_nodes limits the number of unique wallet nodes
+      expanded during one trace.
+    - max_seconds prevents an unexpectedly large graph from
+      consuming the worker indefinitely.
+    - cycles are prevented within each individual path.
+    - higher-value transactions are explored first within
+      the same hop depth.
 
-    max_nodes limits how many destination wallet nodes can be
-    expanded, preventing graph explosion.
-
-    Already discovered paths are preserved even when the node
-    budget is exhausted.
+    Returns:
+        list[dict]: Machine-readable fund-flow paths.
     """
 
-    start_wallet = start_wallet.lower()
+    start_wallet = start_wallet.strip().lower()
 
     max_hops = max(1, int(max_hops))
-    min_amount_pct = float(min_amount_pct)
+    min_amount_pct = max(0.0, float(min_amount_pct))
     max_nodes = max(1, int(max_nodes))
+    max_seconds = max(0.1, float(max_seconds))
+
+    start_time = monotonic()
 
     queue = []
-
-    # Unique sequence number prevents heapq from ever trying
-    # to compare complex objects such as transaction dictionaries.
     sequence = count()
 
     heappush(
@@ -90,13 +121,44 @@ def trace_funds(
     )
 
     paths = []
-    expanded_nodes = 0
+
+    expanded_wallets = set()
+
+    timed_out = False
 
     while queue:
 
+        # -----------------------------------------------------
+        # Time budget
+        # -----------------------------------------------------
+
+        if monotonic() - start_time >= max_seconds:
+            timed_out = True
+
+            while queue:
+                (
+                    _queued_hops,
+                    _queued_priority,
+                    _queued_sequence,
+                    _queued_wallet,
+                    queued_wallets,
+                    queued_transactions,
+                    _queued_visited,
+                ) = heappop(queue)
+
+                if queued_transactions:
+                    paths.append(
+                        _build_path(
+                            queued_wallets,
+                            queued_transactions,
+                        )
+                    )
+
+            break
+
         (
             hops,
-            priority,
+            _priority,
             _sequence,
             current_wallet,
             wallets,
@@ -104,87 +166,177 @@ def trace_funds(
             visited,
         ) = heappop(queue)
 
-        # If this path has already reached the hop limit,
-        # preserve it without expanding further.
+        # -----------------------------------------------------
+        # Hop limit
+        # -----------------------------------------------------
+
         if hops >= max_hops:
             if transactions:
-                paths.append({
-                    "wallets": wallets,
-                    "transactions": transactions,
-                    "hops": len(transactions),
-                })
+                paths.append(
+                    _build_path(
+                        wallets,
+                        transactions,
+                    )
+                )
+
             continue
 
-        outgoing = get_outgoing_transactions(current_wallet)
+        # -----------------------------------------------------
+        # Prevent expanding the same wallet repeatedly
+        # -----------------------------------------------------
+
+        if current_wallet in expanded_wallets:
+            if transactions:
+                paths.append(
+                    _build_path(
+                        wallets,
+                        transactions,
+                    )
+                )
+
+            continue
+
+        # -----------------------------------------------------
+        # Node budget
+        # -----------------------------------------------------
+
+        if len(expanded_wallets) >= max_nodes:
+
+            if transactions:
+                paths.append(
+                    _build_path(
+                        wallets,
+                        transactions,
+                    )
+                )
+
+            while queue:
+                (
+                    _queued_hops,
+                    _queued_priority,
+                    _queued_sequence,
+                    _queued_wallet,
+                    queued_wallets,
+                    queued_transactions,
+                    _queued_visited,
+                ) = heappop(queue)
+
+                if queued_transactions:
+                    paths.append(
+                        _build_path(
+                            queued_wallets,
+                            queued_transactions,
+                        )
+                    )
+
+            break
+
+        expanded_wallets.add(current_wallet)
+
+        # -----------------------------------------------------
+        # Read outgoing transactions
+        # -----------------------------------------------------
+
+        outgoing = get_outgoing_transactions(
+            current_wallet
+        )
 
         outgoing.sort(
-            key=lambda tx: tx["amount"] or 0,
+            key=lambda tx: tx.get("amount") or 0,
             reverse=True,
         )
 
         if not outgoing:
             if transactions:
-                paths.append({
-                    "wallets": wallets,
-                    "transactions": transactions,
-                    "hops": len(transactions),
-                })
+                paths.append(
+                    _build_path(
+                        wallets,
+                        transactions,
+                    )
+                )
+
             continue
 
         extended = False
 
         for transaction in outgoing:
 
-            amount = transaction["amount"]
+            # -------------------------------------------------
+            # Time budget
+            # -------------------------------------------------
 
+            if monotonic() - start_time >= max_seconds:
+                timed_out = True
+                break
+
+            amount = transaction.get("amount")
+
+            # Ignore malformed or non-positive transfers.
             if amount is None or amount <= 0:
                 continue
 
-            # Apply amount-decay pruning.
+            # -------------------------------------------------
+            # Amount-decay pruning
+            # -------------------------------------------------
+
             if transactions:
-                previous_amount = transactions[-1]["amount"]
+
+                previous_amount = transactions[-1].get(
+                    "amount"
+                )
+
+                if (
+                    previous_amount is None
+                    or previous_amount <= 0
+                ):
+                    continue
 
                 minimum_amount = previous_amount * (
-                    min_amount_pct / 100
+                    min_amount_pct / 100.0
                 )
 
                 if amount < minimum_amount:
                     continue
 
-            next_wallet = transaction["to_address"].lower()
+            next_wallet = transaction.get(
+                "to_address"
+            )
 
-            # Prevent cycles such as A -> B -> A.
+            if not next_wallet:
+                continue
+
+            next_wallet = next_wallet.lower()
+
+            # -------------------------------------------------
+            # Cycle prevention
+            # -------------------------------------------------
+
             if next_wallet in visited:
                 continue
 
-            # If expanding this destination would exceed the
-            # node budget, preserve the current path instead
-            # of exploring further.
-            if expanded_nodes >= max_nodes:
-                if transactions:
-                    paths.append({
-                        "wallets": wallets,
-                        "transactions": transactions,
-                        "hops": len(transactions),
-                    })
+            # -------------------------------------------------
+            # Create next traversal state
+            # -------------------------------------------------
 
-                # Stop processing additional destinations from
-                # this wallet because the global node budget
-                # has been reached.
-                break
+            new_wallets = wallets + [
+                next_wallet
+            ]
 
-            new_wallets = wallets + [next_wallet]
-            new_transactions = transactions + [transaction]
-            new_visited = visited | {next_wallet}
+            new_transactions = transactions + [
+                transaction
+            ]
 
-            expanded_nodes += 1
+            new_visited = visited | {
+                next_wallet
+            }
+
             extended = True
 
             heappush(
                 queue,
                 (
                     hops + 1,
-                    -amount,
+                    -float(amount),
                     next(sequence),
                     next_wallet,
                     new_wallets,
@@ -193,35 +345,51 @@ def trace_funds(
                 ),
             )
 
-        # If nothing could be extended, preserve the current path.
-        if not extended and transactions:
-            paths.append({
-                "wallets": wallets,
-                "transactions": transactions,
-                "hops": len(transactions),
-            })
+        # -----------------------------------------------------
+        # Timeout while processing transactions
+        # -----------------------------------------------------
 
-        # Once the global node budget has been reached,
-        # remaining queued paths cannot be expanded.
-        if expanded_nodes >= max_nodes:
+        if timed_out:
+
+            if transactions:
+                paths.append(
+                    _build_path(
+                        wallets,
+                        transactions,
+                    )
+                )
+
             while queue:
                 (
-                    queued_hops,
-                    queued_priority,
+                    _queued_hops,
+                    _queued_priority,
                     _queued_sequence,
-                    queued_wallet,
+                    _queued_wallet,
                     queued_wallets,
                     queued_transactions,
-                    queued_visited,
+                    _queued_visited,
                 ) = heappop(queue)
 
                 if queued_transactions:
-                    paths.append({
-                        "wallets": queued_wallets,
-                        "transactions": queued_transactions,
-                        "hops": len(queued_transactions),
-                    })
+                    paths.append(
+                        _build_path(
+                            queued_wallets,
+                            queued_transactions,
+                        )
+                    )
 
             break
+
+        # -----------------------------------------------------
+        # Dead-end path
+        # -----------------------------------------------------
+
+        if not extended and transactions:
+            paths.append(
+                _build_path(
+                    wallets,
+                    transactions,
+                )
+            )
 
     return paths
