@@ -1,26 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from backend.app.core.security import create_access_token
+from app.core.security import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# Temporary seed users for initial development/testing
-MOCK_USERS = {
-    "lead_investigator": {"role": "Investigator", "password": "password123"},
-    "lead_supervisor": {"role": "Supervisor", "password": "password123"},
-    "admin_user": {"role": "Admin", "password": "password123"},
-}
-
-@router.post("/token")
-def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = MOCK_USERS.get(form_data.username)
-    if not user or user["password"] != form_data.password:
+@router.post("/login")
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    # Mock user database check. Once M4 builds a Users table, query it here.
+    if form_data.username != "admin" or form_data.password != "secret":
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401, 
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Generate the JWT token containing the user's ID and role
     access_token = create_access_token(
-        data={"sub": form_data.username, "role": user["role"]}
+        data={"sub": form_data.username, "role": "lead_investigator"}
     )
-    return {"access_token": access_token, "token_type": "bearer", "role": user["role"]}
+    
+    # FastAPI expects this exact JSON structure for OAuth2 logins
+    return {"access_token": access_token, "token_type": "bearer"}

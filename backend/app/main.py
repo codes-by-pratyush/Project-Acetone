@@ -1,15 +1,16 @@
 from fastapi import FastAPI
-from backend.app.routers.endpoints import router as api_router
-from backend.app.routers import cases, wallets, auth
+from fastapi.middleware.cors import CORSMiddleware
+
+# Removed the "backend." prefix so it runs correctly in Docker
+from app.routers.endpoints import router as api_router
+from app.routers import cases, wallets, auth
 
 app = FastAPI(
     title="Crypto Investigation API",
     version="1.0.0",
     description="API contract specifications for cases, wallet tracing, risk, and alerts.",
 )
-from fastapi.middleware.cors import CORSMiddleware
 
-# Add this right after initializing app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
@@ -28,4 +29,5 @@ app.include_router(wallets.router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.app.main:app", host="127.0.0.1", port=8000, reload=True)
+    # Updated uvicorn path to match the standard Docker environment
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
