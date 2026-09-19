@@ -1,11 +1,15 @@
 from celery import Celery
 
+
 celery_app = Celery(
     "acetone",
     broker="redis://localhost:6379/0",
     backend="redis://localhost:6379/1",
-    include=["Blockchain.tasks.blockchain_tasks"],
+    include=[
+        "Blockchain.tasks.blockchain_tasks"
+    ],
 )
+
 
 celery_app.conf.update(
     task_serializer="json",
@@ -14,3 +18,11 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+
+celery_app.conf.beat_schedule = {
+    "poll-watched-wallets-every-15-seconds": {
+        "task": "Blockchain.tasks.blockchain_tasks.poll_watched_wallets",
+        "schedule": 15.0,
+    },
+}

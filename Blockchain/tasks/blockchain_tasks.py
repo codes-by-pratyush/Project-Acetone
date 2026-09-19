@@ -104,3 +104,29 @@ def poll_wallet(wallet_address):
             "status": "poll_completed",
         }
     )
+
+
+@celery_app.task
+def poll_watched_wallets():
+    wallets = wallet_monitor.get_watched_wallets()
+
+    results = []
+
+    for wallet_address in wallets:
+        transfers, latest_block = (
+            wallet_monitor.check_wallet(
+                wallet_address
+            )
+        )
+
+        results.append(
+            {
+                "wallet": wallet_address,
+                "transfers_found": len(transfers),
+                "latest_block": latest_block,
+                "transfers": transfers,
+                "status": "poll_completed",
+            }
+        )
+
+    return make_json_serializable(results)
