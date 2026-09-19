@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL (Relational Data: Cases, Users, Evidence, Alerts)
+  postgres:
+    image: postgres:15-alpine
+    container_name: acetone-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: acetone_user
+      POSTGRES_PASSWORD: acetone_password
+      POSTGRES_DB: acetone_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Neo4j Community (Graph Data: Wallets & Fund-Flow Hops)
+  neo4j:
+    image: neo4j:5-community
+    container_name: acetone-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/acetone_password
+      NEO4J_PLUGINS: '["apoc"]'
+    ports:
+      - "7474:7474" # Web Browser UI
+      - "7687:7687" # Bolt Protocol
+    volumes:
+      - neo4j_data:/data
+
+  # 3. Redis (Cache, Rate-Limiter, & Celery Task Queue)
+  redis:
+    image: redis:7-alpine
+    container_name: acetone-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  redis_data:

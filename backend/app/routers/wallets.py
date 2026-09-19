@@ -1,28 +1,27 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.schemas.wallets import WalletTraceRequest, WalletTraceResponse
+from app.dependencies.auth import get_current_investigator
 
-router = APIRouter(prefix="/wallets", tags=["Wallets"])
+router = APIRouter(prefix="/wallets", tags=["Wallet Tracing"])
 
-@router.get("/{address}/trace")
-def get_mock_trace(address: str, max_hops: int = 4):
-    # Returns a fake graph format that Cytoscape.js expects
-    return {
-        "nodes": [
-            {"data": {"id": address, "label": "Victim", "risk_score": 0.1}},
-            {"data": {"id": "0xExchangeWallet", "label": "Binance Hot Wallet", "risk_score": 0.9}}
-        ],
-        "edges": [
-            {"data": {"source": address, "target": "0xExchangeWallet", "amount": 1.5, "asset": "ETH"}}
+@router.post("/trace", response_model=WalletTraceResponse)
+def trace_wallet_activity(
+    request: WalletTraceRequest,
+    investigator: dict = Depends(get_current_investigator)
+):
+    # This fulfills the API contract for M3.
+    # It will later trigger actual Neo4j graph database queries.
+    return WalletTraceResponse(
+        wallet_address=request.wallet_address,
+        risk_score=85,
+        suspicious_peers=["0xBadGuyWallet1", "0xScammerWallet2"],
+        recent_transactions=[
+            {
+                "tx_hash": "0xabc123...",
+                "from_address": request.wallet_address,
+                "to_address": "0xBadGuyWallet1",
+                "amount": 5.5,
+                "timestamp": "2026-09-19T10:00:00Z"
+            }
         ]
-    }
-
-@router.get("/{address}/risk")
-def get_mock_risk(address: str):
-    # Returns a fake risk score and the reasons for it
-    return {
-        "address": address,
-        "overall_risk_score": 0.85,
-        "flags": [
-            {"rule": "High Velocity", "weight": 0.5, "evidence": "Funds moved within 3 minutes"},
-            {"rule": "Fan-Out", "weight": 0.35, "evidence": "Split into 5 different wallets"}
-        ]
-    }
+    )
