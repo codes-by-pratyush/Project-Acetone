@@ -25,3 +25,4 @@ uvicorn==0.53.0
 watchfiles==1.2.0
 websockets==17.1
 PyJWT==2.8.0
+neo4j>=5.18.0
